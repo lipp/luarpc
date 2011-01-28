@@ -834,7 +834,7 @@ static void helper_remote_index( Helper *helper )
       len += strlen( hstack[ i ]->funcname ) + 1;
     }
 	
-	  transport_write_u32( tpt, len );
+    transport_write_u32( tpt, len );
 
     // replay helper key names      
     for( i = 0 ; i < helper->nparents ; i ++ )
@@ -957,6 +957,8 @@ static int helper_call (lua_State *L)
       // write each argument
       for( i = 2; i <= n; i ++ )
         write_variable( tpt, L, i );
+
+      transport_flush(tpt);
 
       /* if we're in async mode, we're done */
       /*if ( h->handle->async )

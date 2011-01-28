@@ -205,13 +205,19 @@ void transport_open (Transport *tpt)
     Throw( e );
   }
   setsockopt( tpt->fd, IPPROTO_TCP, TCP_NODELAY, ( char * )&flag, sizeof( int ) );
+  tpt->file = fdopen(tpt->fd,"r+");
+  if( tpt->file == NULL ){
+    e.errnum = sock_errno;
+    e.type = fatal;
+    Throw( e );
+  }
 }
 
 /* close a socket */
 
 void transport_close (Transport *tpt)
 {
-  if (tpt->fd != INVALID_TRANSPORT) close (tpt->fd);
+  if (tpt->fd != INVALID_TRANSPORT) fclose (tpt->file);
   tpt->fd = INVALID_TRANSPORT;
 }
 
@@ -288,6 +294,12 @@ void transport_accept (Transport *tpt, Transport *atpt)
     e.type = fatal;
     Throw( e );
   }
+  atpt->file = fdopen(atpt->fd,"r+");
+  if( tpt->file == NULL ){
+    e.errnum = sock_errno;
+    e.type = fatal;
+    Throw( e );
+  }
 }
 
 
@@ -298,7 +310,7 @@ void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
    struct exception e;
   TRANSPORT_VERIFY_OPEN;
   while (length > 0) {
-    int n = read (tpt->fd,(void*) buffer,length);
+    int n = fread ((void*) buffer,1,length,tpt->file);
     if (n == 0) 
     {
       e.errnum = ERR_EOF;
@@ -325,13 +337,20 @@ void transport_write_buffer (Transport *tpt, const u8 *buffer, int length)
   struct exception e;
   int n;
   TRANSPORT_VERIFY_OPEN;
-  n = write (tpt->fd,buffer,length);
+  n = fwrite (buffer,1,length,tpt->file);
   if (n != length) 
   {
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
   }
+}
+
+void transport_flush (Transport *tpt)
+{
+  struct exception e;
+  TRANSPORT_VERIFY_OPEN;
+  fflush(tpt->file);
 }
 
 int transport_open_connection(lua_State *L, Handle *handle)

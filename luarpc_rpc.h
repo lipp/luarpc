@@ -1,4 +1,5 @@
 
+#include <stdio.h>
 #include "cexcept.h"
 #include "type.h"
 #include "serial.h"
@@ -100,6 +101,7 @@ struct _Transport
          net_little: 1,               // Network is little endian?
          net_intnum: 1;               // Network is integer only?
   u8     lnum_bytes;
+  FILE* file;
 };
 
 typedef struct _Handle Handle;
@@ -176,3 +178,5 @@ int transport_is_open (Transport *tpt);
 
 // Shut down connection
 void transport_close (Transport *tpt);
+
+void transport_flush(Transport *tpt);
