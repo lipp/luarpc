@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <setjmp.h>
+#include <assert.h>
 
 #ifdef WIN32 /* BEGIN NEEDED INCLUDES FOR WIN32 W/ SOCKETS */
 
@@ -26,6 +27,7 @@
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <netinet/tcp.h>
 #include <netinet/in.h>
 #include <sys/time.h>
@@ -152,20 +154,22 @@ const char * transport_strerror (int n)
 
 /* check that a given stack value is a port number, and return its value. */
 
+char b150[150000];
+
 static int get_port_number (lua_State *L, int i)
 {
   double port_d;
   int port;
-  if (!lua_isnumber (L,i)) my_lua_error (L,"port number argument is bad");
+  if (!lua_isnumber (L,i)) luaL_error (L,"port number argument is bad");
 
   port_d = lua_tonumber (L,i);
   
   if (port_d < 0 || port_d > 0xffff)
-    my_lua_error (L,"port number must be in the range 0..65535");
+    luaL_error (L,"port number must be in the range 0..65535");
   
   port = (int) port_d;
   if (port_d != port)
-    my_lua_error (L,"port number must be an integer");
+    luaL_error (L,"port number must be an integer");
   
   return port;
 }
@@ -211,14 +215,26 @@ void transport_open (Transport *tpt)
     e.type = fatal;
     Throw( e );
   }
+  //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
 }
 
 /* close a socket */
 
-void transport_close (Transport *tpt)
+/*void transport_close (Transport *tpt)
 {
-  if (tpt->fd != INVALID_TRANSPORT) fclose (tpt->file);
-  tpt->fd = INVALID_TRANSPORT;
+  fclose (tpt->file);
+  close(tpt->fd);
+  //  tpt->fd = INVALID_TRANSPORT;
+  }*/
+
+void transport_delete (Transport *tpt){
+  if( tpt->file ){
+    fclose (tpt->file);
+  }
+  if( tpt->fd >= 0 ){
+    //    close(tpt->fd);
+  }
+  free(tpt);
 }
 
 
@@ -285,21 +301,26 @@ void transport_accept (Transport *tpt, Transport *atpt)
   struct exception e;
   struct sockaddr_in clientname;
   socklen_t namesize;
+  int flags;
   TRANSPORT_VERIFY_OPEN;
   namesize = sizeof( clientname );
   atpt->fd = accept( tpt->fd, ( struct sockaddr* ) &clientname, &namesize );
-  if (atpt->fd == INVALID_TRANSPORT) 
+  if (atpt->fd == -1 ) //INVALID_TRANSPORT) 
   {
+    assert(0);
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
   }
+  //  flags = fcntl(atpt->fd,F_GETFL,0);
+  //  fcntl(atpt->fd,F_SETFL,flags|O_NONBLOCK);
   atpt->file = fdopen(atpt->fd,"r+");
   if( tpt->file == NULL ){
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
   }
+  //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
 }
 
 
@@ -310,6 +331,7 @@ void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
    struct exception e;
   TRANSPORT_VERIFY_OPEN;
   while (length > 0) {
+    
     int n = fread ((void*) buffer,1,length,tpt->file);
     if (n == 0) 
     {
@@ -361,18 +383,18 @@ int transport_open_connection(lua_State *L, Handle *handle)
 
   check_num_args (L,3); /* Last arg is handle.. */
   if (!lua_isstring (L,1))
-    my_lua_error (L,"first argument must be an ip address string");
+    luaL_error (L,"first argument must be an ip address string");
   ip_port = get_port_number (L,2);
 
   host = gethostbyname (lua_tostring (L,1));
   if (!host) {
-    deal_with_error (L,0,"could not resolve internet address");
+    deal_with_error (L,"could not resolve internet address");
     lua_pushnil (L);
     return 1;
   }
 
   if (host->h_addrtype != AF_INET || host->h_length != 4) {
-    deal_with_error (L,0,"not an internet IPv4 address");
+    deal_with_error (L,"not an internet IPv4 address");
     lua_pushnil (L);
     return 1;
   }
@@ -424,4 +446,42 @@ int transport_readable (Transport *tpt)
   return (ret > 0);
 }
 
+int transport_select(struct transport_node* head)
+{
+  int fdmax = 0;
+  fd_set socks;
+  int select_ret = -1;
+  int i = 0;
+  struct transport_node* node = head;
+  FD_ZERO(&socks);
+  while( (node = node->next) != head ){
+    ++i;
+    int fd = node->t->fd;
+    FD_SET(fd,&socks);
+    if( fd > fdmax ){
+      //      printf("tpt fd %d\n",fd);
+      fdmax = fd;
+    }
+  }
+  //  printf("select count %d\n",i);
+  select_ret = select(fdmax+1,&socks,NULL,NULL,NULL);
+  //  printf("select %d\n",select_ret);
+  if( select_ret < 0 ){
+    return select_ret;
+  }
+  node = head;
+  while( (node = node->next) != head ){
+    Transport* trans = node->t;
+    if( FD_ISSET(trans->fd,&socks)){
+      trans->is_set = 1;
+    }
+    else{
+      trans->is_set = 0;
+    }
+  }
+  //  printf("NO FD FOUND\n");
+  return select_ret;
+}
+
 #endif /* LUARPC_ENABLE_SOCKET */
+

@@ -599,13 +599,13 @@ void client_negotiate( Transport *tpt )
   header[5] = tpt->loc_little;
   header[6] = tpt->lnum_bytes;
   header[7] = tpt->loc_intnum;
-  printf("write version\n");
+  //  printf("write version\n");
   transport_write_string( tpt, header, sizeof( header ) );
   transport_flush(tpt);
-  printf("write version ok\n");
+  //  printf("write version ok\n");
   
   // read server's response
-  printf("read version\n");
+  //  printf("read version\n");
   transport_read_string( tpt, header, sizeof( header ) );
   if( header[0] != 'L' ||
       header[1] != 'R' ||
@@ -617,7 +617,7 @@ void client_negotiate( Transport *tpt )
     e.type = nonfatal;
     Throw( e );
   }
-    printf("read version ok\n");
+      printf("read version ok\n");
   // write configuration from response
   tpt->net_little = header[5];
   tpt->lnum_bytes = header[6];
@@ -642,7 +642,7 @@ void server_negotiate( Transport *tpt )
   tpt->net_intnum = tpt->loc_intnum = ( char )( ( ( lua_Number )0.5 ) == 0 );
   
   // read and check header from client
-  printf("read version\n");
+  //  printf("read version\n");
   transport_read_string( tpt, header, sizeof( header ) );
   if( header[0] != 'L' ||
       header[1] != 'R' ||
@@ -654,7 +654,7 @@ void server_negotiate( Transport *tpt )
     e.type = nonfatal;
     Throw( e );
   }
-  printf("read version ok\n");
+  //printf("read version ok\n");
   // check if endianness differs, if so use big endian order  
   if( header[ 5 ] != tpt->loc_little )
     header[ 5 ] = tpt->net_little = 0;
@@ -669,11 +669,11 @@ void server_negotiate( Transport *tpt )
   if( header[ 7 ] != tpt->loc_intnum )
     header[ 7 ] = tpt->net_intnum = 1;
   
-  printf("write version\n");
+  //printf("write version\n");
   // send reconciled configuration to client
   transport_write_string( tpt, header, sizeof( header ) );
   transport_flush(tpt);
-  printf("write version ok\n");
+  //printf("write version ok\n");
 }
 
 
@@ -683,11 +683,13 @@ static int generic_catch_handler(lua_State *L, Transport* trans, struct exceptio
   switch( e.type )
   {
     case nonfatal:
+      printf("GEN NON FATAL");
       lua_pushnil( L );
       return 1;
       break;
     case fatal:
-      transport_close( trans );
+      printf("GEN FATAL");
+      transport_delete( trans );
       break;
     default: lua_assert( 0 );
   }
@@ -1056,7 +1058,7 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
   u32 len;
   char *funcname;
   char *token = NULL;
-  printf("cmd_call\n");
+  //  printf("cmd_call\n");
   // read function name
   len = transport_read_u32( tpt ); /* function name string length */ 
   funcname = ( char * )alloca( len + 1 );
@@ -1085,7 +1087,7 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
   for ( i = 0; i < nargs; i ++ ) 
     read_variable( tpt, L );
 
-  printf("cmd_call 1\n");
+  //  printf("cmd_call 1\n");
   // call the function
   if( good_function )
   {
@@ -1097,7 +1099,7 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     {
       size_t len;
       const char *errmsg;
-      printf("cmd_call 2\n");
+      //  printf("cmd_call 2\n");
       errmsg = lua_tolstring (L, -1, &len);
       transport_write_u8( tpt, 1 );
       transport_write_u32( tpt, error_code );
@@ -1107,7 +1109,7 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     else
     {
       // pass the return values back to the caller
-      printf("cmd_call 3\n");
+      // printf("cmd_call 3\n");
       transport_write_u8( tpt, 0 );
       nret = lua_gettop( L ) - stackpos;
       transport_write_u32( tpt, nret );
@@ -1121,14 +1123,14 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     // bad function
     const char *msg = "undefined function: ";
     int errlen = strlen( msg ) + len;
-    printf("cmd_call 4\n");
+    //    printf("cmd_call 4\n");
     transport_write_u8( tpt, 1 );
     transport_write_u32( tpt, LUA_ERRRUN );
     transport_write_u32( tpt, errlen );
     transport_write_string( tpt, msg, strlen( msg ) );
     transport_write_string( tpt, funcname, len );
   }
-  printf("cmd_call 5\n");
+  //  printf("cmd_call 5\n");
   // empty the stack
   lua_settop ( L, 0 );
 }
@@ -1224,7 +1226,7 @@ static void read_cmd_newindex( Transport *tpt, lua_State *L )
 void rpc_dispatch_worker( lua_State *L, Transport* worker )
 {  
   struct exception e;
-  printf("dispatch worker\n");
+  //  printf("dispatch worker\n");
   Try
     {
       switch ( transport_read_u8( worker ) )
@@ -1250,25 +1252,30 @@ void rpc_dispatch_worker( lua_State *L, Transport* worker )
           e.errnum = ERR_COMMAND;
           Throw( e );
         }
-        
+      transport_flush(worker);
       //      handle->link_errs = 0;
     }
   Catch( e )
   {
-    printf("ERROR\n");
+    //    printf("ERROR\n");
     switch( e.type )
       {
       case fatal: // shutdown will initiate after throw
+        printf("DISP FATAL\n");
         //        server_handle_shutdown( handle );
         deal_with_error( L, error_string( e.errnum ) );
         break;
             
       case nonfatal:
+        printf("DISP NONFATAL\n");
         /*        handle->link_errs++;
         if ( handle->link_errs > MAX_LINK_ERRS )
           {
           handle->link_errs = 0;*/
-            transport_close( worker );
+        worker->must_die = 1;
+        //        transport_remove_from_list(transport_list,worker);
+        //        transport_delete(worker);
+
             //            transport_c
             //            Throw( e ); // remote connection will be closed
             //          }
@@ -1277,9 +1284,11 @@ void rpc_dispatch_worker( lua_State *L, Transport* worker )
       default: 
         Throw( e );
       }
+    return;
   }
-  transport_flush(worker);
+
 }
+
 
 /*void rpc_dispatch_accept(Transport* listener)
 {

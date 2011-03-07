@@ -1,4 +1,7 @@
 
+#ifndef LUARPC_H
+#define LUARPC_H
+
 #include <stdio.h>
 #include "cexcept.h"
 #include "type.h"
@@ -102,6 +105,8 @@ struct _Transport
          net_intnum: 1;               // Network is integer only?
   u8     lnum_bytes;
   FILE* file;
+  int is_set;
+  int must_die;
 };
 
 typedef struct _Handle Handle;
@@ -125,7 +130,7 @@ struct _Helper {
 typedef struct _ServerHandle ServerHandle;
 struct _ServerHandle {
   Transport ltpt;   // listening transport, always valid if no error
-  Transport atpt;   // accepting transport, valid if connection established
+  //  Transport atpt;   // accepting transport, valid if connection established
 	int link_errs;
 };
 
@@ -147,8 +152,8 @@ struct _ServerHandle {
 
 // Arg & Error Checking Provided to Transport Mechanisms 
 int check_num_args (lua_State *L, int desired_n);
-void deal_with_error (lua_State *L, Handle *h, const char *error_string);
-void my_lua_error( lua_State *L, const char *errmsg );
+void deal_with_error (lua_State *L, const char *error_string);
+//void my_lua_error( lua_State *L, const char *errmsg );
 
 // TRANSPORT API 
 
@@ -177,6 +182,24 @@ int transport_readable (Transport *tpt);
 int transport_is_open (Transport *tpt);
 
 // Shut down connection
-void transport_close (Transport *tpt);
+void transport_delete (Transport *tpt);
+Transport * transport_create (void);
+
 
 void transport_flush(Transport *tpt);
+
+struct transport_node {
+  Transport* t;
+  struct transport_node *prev;
+  struct transport_node *next;
+};
+int transport_select(struct transport_node* transports);
+
+
+
+struct transport_node* transport_new_list();
+void transport_insert_to_list(struct transport_node* head, Transport* t);
+struct transport_node* transport_remove_from_list(struct transport_node* head, Transport* t);
+extern struct transport_node* transport_list;
+#endif
+

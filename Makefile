@@ -15,9 +15,9 @@ UNAME := $(shell uname)
 LIBRARY = rpc
 
 # compiler, arguments and libs for GCC under unix
-CFLAGS += -ansi -fpic -std=c99 -pedantic -g -DLUARPC_STANDALONE -DBUILD_RPC
+CFLAGS += -ansi -fpic -std=c99 -pedantic -g -DLUARPC_STANDALONE -DBUILD_RPC -ggdb
 
-OBJECTS = luarpc.o luarpc_serial.o luarpc_socket.o serial_posix.o
+OBJECTS = luarpc.o luarpc_serial.o luarpc_socket.o serial_posix.o luarpc_protocol.o
 
 # compiler, arguments and libs for GCC under windows
 #CC=gcc -Wall
@@ -46,7 +46,7 @@ serial:
 	gcc $(CFLAGS) -I$(LUAINC) -o $@ -c $<
 
 $(LIBRARY).so: $(OBJECTS)
-	gcc $(LFLAGS) -o $(LIBRARY).so $(OBJECTS)
+	gcc $(LFLAGS) -o $(LIBRARY).so $(OBJECTS) -ggdb
 
 .PHONY : clean
 clean:
