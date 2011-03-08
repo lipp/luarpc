@@ -104,6 +104,7 @@ const char * error_string( int n )
     case ERR_NODATA: return "no data received when attempting to read";
     case ERR_HEADER: return "header exchanged failed";
     case ERR_LONGFNAME: return "function name too long";
+    case ERR_TIMEOUT: return "timeout";
     default: return transport_strerror( n );
   }
 }
@@ -898,6 +899,7 @@ int helper_call (lua_State *L)
       u32 nret,ret_code;
 
       // write function name
+      tpt->timeout = tpt->com_timeout;     
       helper_wait_ready( tpt, RPC_CMD_CALL );
       helper_remote_index( h );
 
@@ -910,6 +912,7 @@ int helper_call (lua_State *L)
         write_variable( tpt, L, i );
 
       transport_flush(tpt);
+      tpt->timeout = tpt->wait_timeout;
 
       /* if we're in async mode, we're done */
       /*if ( h->handle->async )
@@ -920,6 +923,7 @@ int helper_call (lua_State *L)
 
       // read return code
       ret_code = transport_read_u8( tpt );
+      tpt->timeout = tpt->com_timeout;
 
       if ( ret_code == 0 )
       {
@@ -1051,15 +1055,15 @@ int helper_close (lua_State *L)
 //   read function call data and execute the function. this function empties the
 //   stack on entry and exit. This sets a custom error handler to catch errors 
 //   around the function call.
-
+#include <unistd.h>
 static void read_cmd_call( Transport *tpt, lua_State *L )
 {
   int i, stackpos, good_function, nargs;
   u32 len;
   char *funcname;
   char *token = NULL;
-  //  printf("cmd_call\n");
   // read function name
+
   len = transport_read_u32( tpt ); /* function name string length */ 
   funcname = ( char * )alloca( len + 1 );
   transport_read_string( tpt, funcname, len );
@@ -1087,7 +1091,6 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
   for ( i = 0; i < nargs; i ++ ) 
     read_variable( tpt, L );
 
-  //  printf("cmd_call 1\n");
   // call the function
   if( good_function )
   {
@@ -1099,7 +1102,6 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     {
       size_t len;
       const char *errmsg;
-      //  printf("cmd_call 2\n");
       errmsg = lua_tolstring (L, -1, &len);
       transport_write_u8( tpt, 1 );
       transport_write_u32( tpt, error_code );
@@ -1109,7 +1111,6 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     else
     {
       // pass the return values back to the caller
-      // printf("cmd_call 3\n");
       transport_write_u8( tpt, 0 );
       nret = lua_gettop( L ) - stackpos;
       transport_write_u32( tpt, nret );
@@ -1123,14 +1124,12 @@ static void read_cmd_call( Transport *tpt, lua_State *L )
     // bad function
     const char *msg = "undefined function: ";
     int errlen = strlen( msg ) + len;
-    //    printf("cmd_call 4\n");
     transport_write_u8( tpt, 1 );
     transport_write_u32( tpt, LUA_ERRRUN );
     transport_write_u32( tpt, errlen );
     transport_write_string( tpt, msg, strlen( msg ) );
     transport_write_string( tpt, funcname, len );
   }
-  //  printf("cmd_call 5\n");
   // empty the stack
   lua_settop ( L, 0 );
 }
@@ -1226,9 +1225,9 @@ static void read_cmd_newindex( Transport *tpt, lua_State *L )
 void rpc_dispatch_worker( lua_State *L, Transport* worker )
 {  
   struct exception e;
-  //  printf("dispatch worker\n");
   Try
     {
+
       switch ( transport_read_u8( worker ) )
         {
         case RPC_CMD_CALL:  // call function
@@ -1257,17 +1256,14 @@ void rpc_dispatch_worker( lua_State *L, Transport* worker )
     }
   Catch( e )
   {
-    //    printf("ERROR\n");
     switch( e.type )
       {
       case fatal: // shutdown will initiate after throw
-        printf("DISP FATAL\n");
         //        server_handle_shutdown( handle );
         deal_with_error( L, error_string( e.errnum ) );
         break;
             
       case nonfatal:
-        printf("DISP NONFATAL\n");
         /*        handle->link_errs++;
         if ( handle->link_errs > MAX_LINK_ERRS )
           {

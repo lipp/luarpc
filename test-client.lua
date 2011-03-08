@@ -5,11 +5,14 @@ function error_handler (message)
 end
 
 if rpc.mode == "tcpip" then
-    slave, err = rpc.connect ("localhost",12346);
+   print("connecting...")
+   slave, err = rpc.connect ("localhost",tonumber(arg[1]),1000);
+--   rpc.wait_timeout(slave,1)
+   print("ok")
 elseif rpc.mode == "serial" then
     slave, err = rpc.connect ("/dev/ttys0");
 end
-
+print(assert(slave.mirror(42) == 42))
 -- Local Dataset
 
 tab = {a=1, b=2};
@@ -23,7 +26,7 @@ function squareval(x) return x*x end
 -- BEGIN TESTS
 --
 
-for i=1,20 do
+for i=1,2000 do
 
 -- check that our connection exists
 assert( slave, "connection failed" )

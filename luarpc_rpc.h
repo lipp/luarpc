@@ -3,6 +3,7 @@
 #define LUARPC_H
 
 #include <stdio.h>
+#include <sys/time.h>
 #include "cexcept.h"
 #include "type.h"
 #include "serial.h"
@@ -75,7 +76,8 @@ enum {
   ERR_NODATA    = MAXINT - 103,
   ERR_COMMAND   = MAXINT - 106,
   ERR_HEADER    = MAXINT - 107,
-  ERR_LONGFNAME = MAXINT - 108
+  ERR_LONGFNAME = MAXINT - 108,
+  ERR_TIMEOUT   = MAXINT - 109
 };
 
 enum exception_type { done, nonfatal, fatal };
@@ -107,6 +109,9 @@ struct _Transport
   FILE* file;
   int is_set;
   int must_die;
+  struct timeval wait_timeout;
+  struct timeval com_timeout;
+  struct timeval timeout;
 };
 
 typedef struct _Handle Handle;

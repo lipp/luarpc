@@ -41,6 +41,19 @@ void *alloca(size_t);
 #include "luarpc_protocol.h"
 
 
+struct timeval timeval_from_ms( double ms ){
+  struct timeval t;
+  t.tv_sec = (int)(ms / 1000);
+  ms -= t.tv_sec * 1000;
+  t.tv_usec = (int)(ms * 1000);
+  return t;
+}
+
+double ms_from_timeval( struct timeval t ){
+  return t.tv_sec * 1000.0 + t.tv_usec / 1000.0;
+}
+
+
 /*void transport_delete (Transport *tpt){
   free(tpt);
   }*/
@@ -49,6 +62,8 @@ Transport * transport_create (void){
   Transport* t = malloc(sizeof(Transport));
   memset(t,0,sizeof(Transport));
   t->fd = -1;
+  t->wait_timeout.tv_sec = 3;
+  t->com_timeout.tv_sec = 1;
   return t;
 }
 
@@ -138,8 +153,16 @@ static int rpc_connect( lua_State *L )
   
   Try
   {
+    double timeout_ms = luaL_optnumber(L,3,-1.0);
     handle = handle_create ( L );
     transport_open_connection( L, handle );    
+
+
+    if( timeout_ms != -1.0 ){
+      handle->tpt.com_timeout = timeval_from_ms( timeout_ms );
+    }
+
+    handle->tpt.timeout = handle->tpt.com_timeout;
     client_negotiate( &handle->tpt );
   }
   Catch( e )
@@ -177,6 +200,69 @@ static int rpc_close( lua_State *L )
       ServerHandle *handle = ( ServerHandle * )lua_touserdata( L, 1 );
       server_handle_shutdown( handle );
       return 0;
+    }
+  }
+
+  return luaL_error(L,"arg must be handle");
+}
+
+static int rpc_wait_timeout( lua_State *L )
+{
+  //  check_num_args( L, 2 );
+
+  if( lua_isuserdata( L, 1 ) )
+  {
+    if( ismetatable_type( L, 1, "rpc.handle" ) )
+    {
+      Handle *handle = ( Handle * )lua_touserdata( L, 1 );
+      double timeout_ms = luaL_optnumber(L,2,-1.0);
+      if( timeout_ms != -1.0 ){
+        handle->tpt.wait_timeout = timeval_from_ms( timeout_ms );
+        return 0;
+      }
+      else {
+        lua_pushnumber(L,ms_from_timeval( handle->tpt.wait_timeout ) );
+        return 1;
+      }
+    }
+  }
+  return luaL_error(L,"arg must be rpc.handle");
+}
+
+static int rpc_com_timeout( lua_State *L )
+{
+  //  check_num_args( L, 1 );
+
+  if( lua_isuserdata( L, 1 ) )
+  {
+    if( ismetatable_type( L, 1, "rpc.handle" ) )
+    {
+      Handle *handle = ( Handle * )lua_touserdata( L, 1 );
+      
+      double timeout_ms = luaL_optnumber(L,2,-1.0);
+      if( timeout_ms != -1.0 ){
+        handle->tpt.com_timeout = timeval_from_ms( timeout_ms );
+        return 0;
+      }
+      else {
+        lua_pushnumber(L,ms_from_timeval( handle->tpt.com_timeout ) );
+        return 1;
+      }
+    }
+
+    if( ismetatable_type( L, 1, "rpc.server_handle" ) )
+    {
+      ServerHandle *handle = ( ServerHandle * )lua_touserdata( L, 1 );
+
+      double timeout_ms = luaL_optnumber(L,2,-1.0);
+      if( timeout_ms != -1.0 ){
+        handle->ltpt.com_timeout = timeval_from_ms( timeout_ms );
+        return 0;
+      }
+      else {
+        lua_pushnumber(L,ms_from_timeval( handle->ltpt.com_timeout ) );
+        return 1;
+      }
     }
   }
 
@@ -298,6 +384,7 @@ static void rpc_dispatch_accept(Transport* listener)
     // if accepting transport is not open, accept a new connection from the
       // listening transport
   Transport* worker = transport_create();
+  worker->timeout = worker->com_timeout;
   transport_insert_to_list(transport_list,worker);
   //  printf("luarpc: accepting\n");
   //transport_count++;       
@@ -615,6 +702,8 @@ static const luaL_reg rpc_map[] =
   { "close", rpc_close },
   { "server", rpc_server },
   { "on_error", rpc_on_error },
+  { "com_timeout", rpc_com_timeout },
+  { "wait_timeout", rpc_wait_timeout },
   //  { "listen", rpc_listen },
   //  { "peek", rpc_peek },
   //  { "dispatch", rpc_dispatch },

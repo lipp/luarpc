@@ -244,6 +244,7 @@ static void transport_connect (Transport *tpt, u32 ip_address, u16 ip_port)
 {
   struct exception e;
   struct sockaddr_in myname;
+  int flags = 1;
   TRANSPORT_VERIFY_OPEN;
   myname.sin_family = AF_INET;
   myname.sin_port = htons (ip_port);
@@ -254,6 +255,8 @@ static void transport_connect (Transport *tpt, u32 ip_address, u16 ip_port)
     e.type = fatal;
     Throw( e );
   }
+  flags = fcntl(tpt->fd,F_GETFL,0);
+  fcntl(tpt->fd,F_SETFL,flags|O_NONBLOCK);
 }
 
 
@@ -312,14 +315,14 @@ void transport_accept (Transport *tpt, Transport *atpt)
     e.type = fatal;
     Throw( e );
   }
-  //  flags = fcntl(atpt->fd,F_GETFL,0);
-  //  fcntl(atpt->fd,F_SETFL,flags|O_NONBLOCK);
+  flags = fcntl(atpt->fd,F_GETFL,0);
+  fcntl(atpt->fd,F_SETFL,flags|O_NONBLOCK);
   atpt->file = fdopen(atpt->fd,"r+");
-  if( tpt->file == NULL ){
+  /*  if( atpt->file == NULL ){
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
-  }
+    }*/
   //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
 }
 
@@ -328,29 +331,79 @@ void transport_accept (Transport *tpt, Transport *atpt)
 
 void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
 {
-   struct exception e;
-  TRANSPORT_VERIFY_OPEN;
+   struct exception e;   
+   TRANSPORT_VERIFY_OPEN;
+
   while (length > 0) {
-    
     int n = fread ((void*) buffer,1,length,tpt->file);
-    if (n == 0) 
-    {
-      e.errnum = ERR_EOF;
+    //    printf("fread ret = %d %d %d\n",length,n,errno);
+    buffer += n;
+    length -= n;    
+    if( n == 0 && feof(tpt->file) ){
+      e.errnum = sock_errno;
       e.type = nonfatal;
       Throw( e );
-    }
-
-    if (n < 0) 
-    {
+    } 
+    if (length && sock_errno == EAGAIN ) {
+        fd_set set;
+        struct timeval tv;
+        int ret;
+        
+        FD_ZERO (&set);
+        FD_SET (tpt->fd,&set);
+        //        printf("EAGAIN & SELECT\n");
+        ret = select(tpt->fd+1,&set,NULL,NULL,&tpt->timeout);
+        //   printf("select ret = %d\n",ret);
+        if( ret == 0 ){
+          e.errnum = ERR_TIMEOUT;
+          e.type = nonfatal;
+          Throw( e );
+        }        
+        //        printf("EAGAIN & SELECT returns\n");
+           
+    } 
+    else if( length != 0 ) {
       e.errnum = sock_errno;
-      e.type = fatal;
+      e.type = nonfatal;
       Throw( e );
-    }
-
-    buffer += n;
-    length -= n;
+    }   
   }
-}
+  }
+ /*
+void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
+{
+   struct exception e;   
+   TRANSPORT_VERIFY_OPEN;
+   fd_set set;
+   struct timeval tv;
+   int ret;
+   
+   FD_ZERO (&set);
+   FD_SET (tpt->fd,&set);
+   
+   
+   while ( (ret = select(tpt->fd+1,&set,NULL,NULL,&tpt->time_out)) > -1 ) {
+     if( ret == 0 ){
+       e.errnum = ERR_TIMEOUT;
+       e.type = nonfatal;
+       Throw( e );
+     }        
+     int n = fread ((void*) buffer,1,length,tpt->file);
+     buffer += n;
+     length -= n;    
+   FD_ZERO (&set);
+   FD_SET (tpt->fd,&set);
+     if( n == 0 ){
+       e.errnum = sock_errno;
+       e.type = nonfatal;
+       Throw( e );
+     }
+     //     else if
+     if( length == 0 ){
+       break;
+     }
+   }
+}*/
 
 /* write a buffer to the socket */
 
@@ -359,13 +412,51 @@ void transport_write_buffer (Transport *tpt, const u8 *buffer, int length)
   struct exception e;
   int n;
   TRANSPORT_VERIFY_OPEN;
+  while (length > 0) {
+    n = fwrite (buffer,1,length,tpt->file);
+
+    buffer += n;
+    length -= n;    
+
+    if( n == 0 && feof(tpt->file) ){
+      e.errnum = sock_errno;
+      e.type = nonfatal;
+      Throw( e );
+    } 
+    if (length && sock_errno == EAGAIN ) {
+        fd_set set;
+        struct timeval tv;
+        int ret;
+        
+        FD_ZERO (&set);
+        FD_SET (tpt->fd,&set);
+        //        printf("EAGAIN & SELECT\n");
+        ret = select(tpt->fd+1,NULL,&set,NULL,&tpt->timeout);
+        //   printf("select ret = %d\n",ret);
+        if( ret == 0 ){
+          e.errnum = ERR_TIMEOUT;
+          e.type = nonfatal;
+          Throw( e );
+        }        
+        //        printf("EAGAIN & SELECT returns\n");
+           
+    } 
+    else if( length != 0 ) {
+      e.errnum = sock_errno;
+      e.type = nonfatal;
+      Throw( e );
+    }   
+  }
+
+  /*
+
   n = fwrite (buffer,1,length,tpt->file);
   if (n != length) 
   {
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
-  }
+    }*/
 }
 
 void transport_flush (Transport *tpt)
@@ -381,7 +472,7 @@ int transport_open_connection(lua_State *L, Handle *handle)
   u32 ip_address;
   struct hostent *host;
 
-  check_num_args (L,3); /* Last arg is handle.. */
+  //  check_num_args (L,3); /* Last arg is handle.. */
   if (!lua_isstring (L,1))
     luaL_error (L,"first argument must be an ip address string");
   ip_port = get_port_number (L,2);
