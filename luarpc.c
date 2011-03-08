@@ -153,16 +153,16 @@ static int rpc_connect( lua_State *L )
   
   Try
   {
-    double timeout_ms = luaL_optnumber(L,3,-1.0);
+    double com_timeout_ms = luaL_optnumber(L,3,1000.0);
+    double wait_timeout_ms = luaL_optnumber(L,5,3000.0);
     handle = handle_create ( L );
-    transport_open_connection( L, handle );    
 
-
-    if( timeout_ms != -1.0 ){
-      handle->tpt.com_timeout = timeval_from_ms( timeout_ms );
-    }
+    handle->tpt.com_timeout = timeval_from_ms( com_timeout_ms );
+    handle->tpt.wait_timeout = timeval_from_ms( wait_timeout_ms );
+    
 
     handle->tpt.timeout = handle->tpt.com_timeout;
+    transport_open_connection( L, handle );    
     client_negotiate( &handle->tpt );
   }
   Catch( e )

@@ -244,19 +244,35 @@ static void transport_connect (Transport *tpt, u32 ip_address, u16 ip_port)
 {
   struct exception e;
   struct sockaddr_in myname;
-  int flags = 1;
+  int flags;
+  int err,valopt;
   TRANSPORT_VERIFY_OPEN;
   myname.sin_family = AF_INET;
   myname.sin_port = htons (ip_port);
   myname.sin_addr.s_addr = htonl (ip_address);
-  if (connect (tpt->fd, (struct sockaddr *) &myname, sizeof (myname)) != 0)
-  {
-    e.errnum = sock_errno;
-    e.type = fatal;
-    Throw( e );
-  }
-  flags = fcntl(tpt->fd,F_GETFL,0);
+  flags = fcntl(tpt->fd,F_GETFL,NULL);
   fcntl(tpt->fd,F_SETFL,flags|O_NONBLOCK);
+  err = connect (tpt->fd, (struct sockaddr *) &myname, sizeof (myname));
+  if( err < 0 ){
+    if( sock_errno == EINPROGRESS ){
+      fd_set set;        
+      unsigned int len; 
+      FD_ZERO (&set);
+      FD_SET (tpt->fd,&set);
+      if( select(tpt->fd+1,NULL,&set,NULL,&tpt->timeout) > 0 ){
+        if( getpeername(tpt->fd, (struct sockaddr *) &myname, &len) != 0 ){
+          e.errnum = sock_errno;
+          e.type = fatal;
+          Throw( e );
+        }
+      }
+      else {
+        e.errnum = ERR_TIMEOUT;
+        e.type = fatal;
+        Throw( e );
+      }
+    }
+  }
 }
 
 
@@ -345,8 +361,7 @@ void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
       Throw( e );
     } 
     if (length && sock_errno == EAGAIN ) {
-        fd_set set;
-        struct timeval tv;
+        fd_set set;       
         int ret;
         
         FD_ZERO (&set);
@@ -424,8 +439,7 @@ void transport_write_buffer (Transport *tpt, const u8 *buffer, int length)
       Throw( e );
     } 
     if (length && sock_errno == EAGAIN ) {
-        fd_set set;
-        struct timeval tv;
+        fd_set set;    
         int ret;
         
         FD_ZERO (&set);
@@ -493,6 +507,8 @@ int transport_open_connection(lua_State *L, Handle *handle)
 
   transport_open (&handle->tpt);
 
+  
+  handle->tpt.timeout = handle->tpt.com_timeout;
   /* connect the transport to the target server */
   transport_connect (&handle->tpt,ip_address,(u16) ip_port);
 
