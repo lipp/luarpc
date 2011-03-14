@@ -16,10 +16,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 #ifdef __MINGW32__
 void *alloca(size_t);
-#else
+#elif WIN32
+#define alloca _alloca
+else
 #include <alloca.h>
 #endif
 
@@ -70,12 +71,46 @@ Transport * transport_create (void){
 struct transport_node* transport_list;
 
 
+#ifdef WIN32
+static void net_startup()
+{
+  struct exception e;
+  WORD wVersionRequested;
+  WSADATA wsaData;
+  int err;
+
+  // startup WinSock version 2
+  wVersionRequested = MAKEWORD(2,0);
+  err = WSAStartup (wVersionRequested, &wsaData);
+  if (err != 0) {
+    e.errnum = WSAGetLastError();
+    e.type = fatal;
+    Throw( e );
+  }
+
+  // confirm that the WinSock DLL supports 2.0. note that if the DLL
+  // supports versions greater than 2.0 in addition to 2.0, it will
+  // still return 2.0 in wVersion since that is the version we requested.
+  if (LOBYTE (wsaData.wVersion ) != 2 ||
+    HIBYTE(wsaData.wVersion) != 0 ) {
+      WSACleanup();
+      if (err != 0) {
+        e.errnum = WSAGetLastError();
+        e.type = fatal;
+        Throw( e );
+      }
+  }
+}
+#endif
+
+
 struct transport_node* transport_new_list(){
   struct transport_node* node = (struct transport_node*) malloc(sizeof(struct transport_node));  
   //  printf("node %p\n",node);
   node->t = NULL;
   node->prev = node;
   node->next = node;
+  return node;
 }
 
 void transport_insert_to_list(struct transport_node* head, Transport* t){
@@ -191,8 +226,12 @@ static int rpc_close( lua_State *L )
     {
       Handle *handle = ( Handle * )lua_touserdata( L, 1 );
       //      transport_delete( &handle->tpt );
+
+#ifdef WIN32
+      closesocket(handle->tpt.fd);
+#else
       fclose(handle->tpt.file);
-      //      fclose(handle.tpt.);
+#endif
       return 0;
     }
     if( ismetatable_type( L, 1, "rpc.server_handle" ) )
@@ -330,11 +369,11 @@ static ServerHandle *rpc_listen_helper( lua_State *L )
     return luaL_error( L, "bad handle" );
     
   return 1;
-  }*/
+  }
 
 
 // rpc_peek( server_handle ) --> 0 or 1 
-/*static int rpc_peek( lua_State *L )
+static int rpc_peek( lua_State *L )
 {
   ServerHandle *handle;
 
@@ -386,8 +425,6 @@ static void rpc_dispatch_accept(Transport* listener)
   Transport* worker = transport_create();
   worker->timeout = worker->com_timeout;
   transport_insert_to_list(transport_list,worker);
-  //  printf("luarpc: accepting\n");
-  //transport_count++;       
   Try{
     transport_accept( listener, worker );
     server_negotiate( worker );
@@ -403,11 +440,14 @@ static void rpc_dispatch_accept(Transport* listener)
 static int rpc_server( lua_State *L )
 {
   int shref;
-  ServerHandle *handle = rpc_listen_helper( L );
-  //  int selects;
-  //  int i; 
+  ServerHandle *handle;
+
   struct transport_node* node;
-  Transport* listener = &handle->ltpt;
+  Transport* listener;
+
+  handle = rpc_listen_helper( L );
+  listener = &handle->ltpt; 
+
   transport_list = transport_new_list();
   transport_insert_to_list( transport_list, listener ); 
   node = transport_list;
@@ -726,6 +766,9 @@ LUALIB_API int luaopen_rpc(lua_State *L)
   
   luaL_newmetatable( L, "rpc.server_handle" );
 
+#ifdef WIN32
+  net_startup();
+#endif
   return 1;
 }
 

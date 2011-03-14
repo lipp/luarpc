@@ -34,7 +34,7 @@ void ser_close( ser_handler id )
 
 // Helper function: get baud ID from actual baud rate
 #define BAUDCASE(x)  case x: return B##x
-static u32 ser_baud_to_id( u32 baud )
+static uint32_t ser_baud_to_id( uint32_t baud )
 {
   switch( baud )
   {
@@ -66,7 +66,7 @@ static int ser_number_of_bits_to_id( int nb )
   return 0;
 }
 
-int ser_setup( ser_handler id, u32 baud, int databits, int parity, int stopbits )
+int ser_setup( ser_handler id, uint32_t baud, int databits, int parity, int stopbits )
 {
   struct termios termdata;
   struct timespec tsleep;
@@ -142,37 +142,37 @@ int ser_setup( ser_handler id, u32 baud, int databits, int parity, int stopbits 
 }
 
 // Read up to the specified number of bytes, return bytes actually read
-u32 ser_read( ser_handler id, u8* dest, u32 maxsize )
+uint32_t ser_read( ser_handler id, uint8_t* dest, uint32_t maxsize )
 {
-  return ( u32 )read( ( int )id, dest, maxsize );
+  return ( uint32_t )read( ( int )id, dest, maxsize );
 }
 
 // Read a single byte and return it (or -1 for error)
 int ser_read_byte( ser_handler id )
 {
-  u8 data;
+  uint8_t data;
   int res = ser_read( id, &data, 1 );
 
   return res == 1 ? data : -1;
 }
 
 // Write up to the specified number of bytes, return bytes actually written
-u32 ser_write( ser_handler id, const u8 *src, u32 size )
+uint32_t ser_write( ser_handler id, const uint8_t *src, uint32_t size )
 {
-  u32 res;
+  uint32_t res;
   
-  res = ( u32 )write( ( int )id, src, size );
+  res = ( uint32_t )write( ( int )id, src, size );
   return res;
 }
 
 // Write a byte to the serial port
-u32 ser_write_byte( ser_handler id, u8 data )
+uint32_t ser_write_byte( ser_handler id, uint8_t data )
 {
-  return ( u32 )write( id, &data, 1 );
+  return ( uint32_t )write( id, &data, 1 );
 }
 
 // Set communication timeout
-void ser_set_timeout_ms( ser_handler id, u32 timeout )
+void ser_set_timeout_ms( ser_handler id, uint32_t timeout )
 {
   struct termios termdata;
 

@@ -54,7 +54,7 @@ void ser_close( ser_handler id )
   CloseHandle( id );
 }
 
-int ser_setup( ser_handler id, u32 baud, int databits, int parity, int stopbits )
+int ser_setup( ser_handler id, uint32_t baud, int databits, int parity, int stopbits )
 {
   HANDLE hComm = ( HANDLE )id;
   DCB dcb;
@@ -98,7 +98,7 @@ int ser_setup( ser_handler id, u32 baud, int databits, int parity, int stopbits 
 }
 
 // Read up to the specified number of bytes, return bytes actually read
-u32 ser_read( ser_handler id, u8* dest, u32 maxsize )
+uint32_t ser_read( ser_handler id, uint8_t* dest, uint32_t maxsize )
 {
   HANDLE hComm = ( HANDLE )id;
   DWORD readbytes;
@@ -111,7 +111,7 @@ u32 ser_read( ser_handler id, u8* dest, u32 maxsize )
 // Read a single byte and return it (or -1 for error)
 int ser_read_byte( ser_handler id )
 {
-  u8 data;
+  uint8_t data;
   int res = ser_read( id, &data, 1 );
 
   //printf( "READ %02X, res is %d\n", data, res );
@@ -119,7 +119,7 @@ int ser_read_byte( ser_handler id )
 }
 
 // Write up to the specified number of bytes, return bytes actually written
-u32 ser_write( ser_handler id, const u8 *src, u32 size )
+uint32_t ser_write( ser_handler id, const uint8_t *src, uint32_t size )
 {
   HANDLE hComm = ( HANDLE )id;
   DWORD written;
@@ -130,13 +130,13 @@ u32 ser_write( ser_handler id, const u8 *src, u32 size )
 }
 
 // Write a byte to the serial port
-u32 ser_write_byte( ser_handler id, u8 data )
+uint32_t ser_write_byte( ser_handler id, uint8_t data )
 {
   return ser_write( id, &data, 1 );
 }
 
 // Set communication timeout
-void ser_set_timeout_ms( ser_handler id, u32 timeout )
+void ser_set_timeout_ms( ser_handler id, uint32_t timeout )
 {
   if( timeout == SER_NO_TIMEOUT )
     ser_win32_set_timeouts( id, MAXDWORD, 0, 0, 0, 0 );

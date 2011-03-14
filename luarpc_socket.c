@@ -13,7 +13,15 @@
 
 #ifdef WIN32 /* BEGIN NEEDED INCLUDES FOR WIN32 W/ SOCKETS */
 
+#include <WinSock2.h>
 #include <windows.h>
+#include <WS2tcpip.h>
+
+
+#define sock_errno WSAGetLastError()
+
+#define EINPROGRESS WSAEWOULDBLOCK
+#define EAGAIN WSAEWOULDBLOCK
 
 #else /* BEGIN NEEDED INCLUDES FOR UNIX W/ SOCKETS */
 
@@ -32,6 +40,8 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 
+#define sock_errno errno
+
 #endif /* END NEEDED INCLUDES W/ SOCKETS */
 
 #include "lua.h"
@@ -48,29 +58,6 @@
 /* handle the differences between winsock and unix */
 
 #ifdef WIN32  /*  BEGIN WIN32 SOCKET SETUP  */
-
-/* this should be called before any network operations */
-
-static void net_startup()
-{
-  WORD wVersionRequested;
-  WSADATA wsaData;
-  int err;
-
-  // startup WinSock version 2
-  wVersionRequested = MAKEWORD(2,0);
-  err = WSAStartup (wVersionRequested,&wsaData);
-  if (err != 0) panic ("could not start winsock");
-
-  // confirm that the WinSock DLL supports 2.0. note that if the DLL
-  // supports versions greater than 2.0 in addition to 2.0, it will
-  // still return 2.0 in wVersion since that is the version we requested.
-  if (LOBYTE (wsaData.wVersion ) != 2 ||
-      HIBYTE(wsaData.wVersion) != 0 ) {
-    WSACleanup();
-    panic ("bad winsock version (< 2)");
-  }
-}
 
 
 /* WinSock does not seem to have a strerror() style function, so here it is. */
@@ -150,11 +137,9 @@ const char * transport_strerror (int n)
 
 #endif /* END WINDOWS SOCKET STUFF  */
 
-#define sock_errno errno
 
 /* check that a given stack value is a port number, and return its value. */
 
-char b150[150000];
 
 static int get_port_number (lua_State *L, int i)
 {
@@ -182,10 +167,10 @@ static int get_port_number (lua_State *L, int i)
 
 
 /* Initializer / Constructor for Transport */
-
 void transport_init (Transport *tpt)
 {
   tpt->fd = INVALID_TRANSPORT;
+  tpt->must_die = 0;
 }
 
 /* see if a socket is open */
@@ -201,7 +186,11 @@ void transport_open (Transport *tpt)
 {
   struct exception e;
   int flag = 1;
+#ifdef WIN32
+  tpt->fd = WSASocket( PF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0, 0 );
+#else
   tpt->fd = socket (PF_INET,SOCK_STREAM,IPPROTO_TCP);
+#endif
   if (tpt->fd == INVALID_TRANSPORT) 
   {
     e.errnum = sock_errno;
@@ -209,12 +198,14 @@ void transport_open (Transport *tpt)
     Throw( e );
   }
   setsockopt( tpt->fd, IPPROTO_TCP, TCP_NODELAY, ( char * )&flag, sizeof( int ) );
+#ifndef WIN32
   tpt->file = fdopen(tpt->fd,"r+");
   if( tpt->file == NULL ){
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
   }
+#endif
   //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
 }
 
@@ -228,35 +219,59 @@ void transport_open (Transport *tpt)
   }*/
 
 void transport_delete (Transport *tpt){
+#ifdef WIN32
+  closesocket(tpt->fd);
+#else
   if( tpt->file ){
     fclose (tpt->file);
   }
-  if( tpt->fd >= 0 ){
-    //    close(tpt->fd);
-  }
+#endif
+
   free(tpt);
 }
 
 
+static void transport_setnonblock (Transport *tpt)
+{
+  struct exception e;
+  int RetVal;
+
+#ifdef WIN32
+  u_long arg = 1;
+
+  RetVal = ioctlsocket( tpt->fd, FIONBIO, &arg);
+#else
+  int flags = fcntl(tpt->fd,F_GETFL,NULL);
+  RetVal = fcntl(tpt->fd,F_SETFL,flags|O_NONBLOCK);
+#endif
+
+  if(RetVal!=0)
+  {
+    e.errnum = sock_errno;
+    e.type = fatal;
+    Throw( e );
+  }
+}
+
 /* connect the socket to a host */
 
-static void transport_connect (Transport *tpt, u32 ip_address, u16 ip_port)
+static void transport_connect (Transport *tpt, uint32_t ip_address, uint16_t ip_port)
 {
   struct exception e;
   struct sockaddr_in myname;
-  int flags;
-  int err,valopt;
+  int err;
   TRANSPORT_VERIFY_OPEN;
   myname.sin_family = AF_INET;
   myname.sin_port = htons (ip_port);
   myname.sin_addr.s_addr = htonl (ip_address);
-  flags = fcntl(tpt->fd,F_GETFL,NULL);
-  fcntl(tpt->fd,F_SETFL,flags|O_NONBLOCK);
+
+  transport_setnonblock(tpt);
+
   err = connect (tpt->fd, (struct sockaddr *) &myname, sizeof (myname));
   if( err < 0 ){
     if( sock_errno == EINPROGRESS ){
       fd_set set;        
-      unsigned int len; 
+      unsigned int len = sizeof(myname); 
       FD_ZERO (&set);
       FD_SET (tpt->fd,&set);
       if( select(tpt->fd+1,NULL,&set,NULL,&tpt->timeout) > 0 ){
@@ -278,7 +293,7 @@ static void transport_connect (Transport *tpt, u32 ip_address, u16 ip_port)
 
 /* bind the socket to a given address/port. the address can be INADDR_ANY. */
 
-static void transport_bind (Transport *tpt, u32 ip_address, u16 ip_port)
+static void transport_bind (Transport *tpt, uint32_t ip_address, uint16_t ip_port)
 {
   struct exception e;
   struct sockaddr_in myname;
@@ -320,7 +335,6 @@ void transport_accept (Transport *tpt, Transport *atpt)
   struct exception e;
   struct sockaddr_in clientname;
   socklen_t namesize;
-  int flags;
   TRANSPORT_VERIFY_OPEN;
   namesize = sizeof( clientname );
   atpt->fd = accept( tpt->fd, ( struct sockaddr* ) &clientname, &namesize );
@@ -331,21 +345,107 @@ void transport_accept (Transport *tpt, Transport *atpt)
     e.type = fatal;
     Throw( e );
   }
-  flags = fcntl(atpt->fd,F_GETFL,0);
-  fcntl(atpt->fd,F_SETFL,flags|O_NONBLOCK);
+
+#ifndef WIN32
   atpt->file = fdopen(atpt->fd,"r+");
-  /*  if( atpt->file == NULL ){
+  if( atpt->file == NULL ){
     e.errnum = sock_errno;
     e.type = fatal;
     Throw( e );
-    }*/
-  //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
+  }
+#endif
+  transport_setnonblock(atpt);
 }
 
+#ifdef WIN32
+/* read from the socket into a buffer */
+
+void transport_read_buffer (Transport *tpt, uint8_t *buffer, int length)
+{
+  struct exception e;   
+  int n = 0;
+  TRANSPORT_VERIFY_OPEN;
+
+
+  while (length > 0) {    
+     
+#ifdef WIN32
+    BOOL RetVal = ReadFile( (HANDLE)tpt->fd, buffer, length, &n, NULL);
+//#else
+//     n = (int) fread ((void*) buffer,1,length,tpt->file);
+#endif
+    int last_err;
+    
+    last_err = GetLastError();
+    //    printf("fread ret = %d %d %d\n",length,n,errno);
+    if( RetVal == TRUE && n != 0){
+      buffer += n;  
+      length -= n;  
+    } else if( last_err == ERROR_IO_PENDING ) {      
+        fd_set set;       
+        int ret;
+
+        FD_ZERO (&set);
+        FD_SET (tpt->fd,&set);
+        ret = select( (int)tpt->fd+1,&set,NULL,NULL,&tpt->timeout);
+        if( ret == 0 ){
+          e.errnum = ERR_TIMEOUT;
+          e.type = nonfatal;
+          Throw( e );
+        }                 
+    }
+    else{
+      e.errnum = last_err;
+      e.type = nonfatal;
+      Throw( e );
+    }
+  }
+}
+ 
+
+/* write a buffer to the socket */
+
+void transport_write_buffer (Transport *tpt, const uint8_t *buffer, int length)
+{
+  struct exception e;
+  TRANSPORT_VERIFY_OPEN;
+  while (length > 0) {
+    BOOL Status;
+    int n;
+    int last_error;
+    Status = WriteFile( (HANDLE)tpt->fd, buffer, length, &n, NULL );
+    last_error = GetLastError();  
+    //int n = (int) fwrite (buffer,1,length,tpt->file);
+    if( Status == TRUE && n != 0){
+      buffer += n;  
+      length -= n;  
+    } 
+    else if(last_error == ERROR_IO_PENDING ){            
+        fd_set set;       
+        int ret;
+
+        FD_ZERO (&set);
+        FD_SET (tpt->fd,&set);
+        ret = select( (int)tpt->fd+1,&set,NULL,NULL,&tpt->timeout);
+        if( ret == 0 ){
+          e.errnum = ERR_TIMEOUT;
+          e.type = nonfatal;
+          Throw( e );
+        }        
+    }      
+    else{
+      e.errnum = last_error;
+      e.type = nonfatal;
+      Throw( e );
+    }    
+  }
+}
+
+#else
 
 /* read from the socket into a buffer */
 
-void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
+void transport_read_buffer (Transport *tpt, uint8_t *buffer, int length)
 {
    struct exception e;   
    TRANSPORT_VERIFY_OPEN;
@@ -384,45 +484,9 @@ void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
     }   
   }
   }
- /*
-void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
-{
-   struct exception e;   
-   TRANSPORT_VERIFY_OPEN;
-   fd_set set;
-   struct timeval tv;
-   int ret;
-   
-   FD_ZERO (&set);
-   FD_SET (tpt->fd,&set);
-   
-   
-   while ( (ret = select(tpt->fd+1,&set,NULL,NULL,&tpt->time_out)) > -1 ) {
-     if( ret == 0 ){
-       e.errnum = ERR_TIMEOUT;
-       e.type = nonfatal;
-       Throw( e );
-     }        
-     int n = fread ((void*) buffer,1,length,tpt->file);
-     buffer += n;
-     length -= n;    
-   FD_ZERO (&set);
-   FD_SET (tpt->fd,&set);
-     if( n == 0 ){
-       e.errnum = sock_errno;
-       e.type = nonfatal;
-       Throw( e );
-     }
-     //     else if
-     if( length == 0 ){
-       break;
-     }
-   }
-}*/
-
 /* write a buffer to the socket */
 
-void transport_write_buffer (Transport *tpt, const u8 *buffer, int length)
+void transport_write_buffer (Transport *tpt, const uint8_t *buffer, int length)
 {
   struct exception e;
   int n;
@@ -473,17 +537,23 @@ void transport_write_buffer (Transport *tpt, const u8 *buffer, int length)
     }*/
 }
 
+#endif 
+
 void transport_flush (Transport *tpt)
 {
   struct exception e;
   TRANSPORT_VERIFY_OPEN;
+#ifdef WIN32
+  FlushFileBuffers( (HANDLE)tpt->fd );
+#else
   fflush(tpt->file);
+#endif
 }
 
 int transport_open_connection(lua_State *L, Handle *handle)
 {
   int ip_port;
-  u32 ip_address;
+  uint32_t ip_address;
   struct hostent *host;
 
   //  check_num_args (L,3); /* Last arg is handle.. */
@@ -503,14 +573,14 @@ int transport_open_connection(lua_State *L, Handle *handle)
     lua_pushnil (L);
     return 1;
   }
-  ip_address = ntohl ( *((u32*)host->h_addr_list[0]) );
+  ip_address = ntohl ( *((uint32_t*)host->h_addr_list[0]) );
 
   transport_open (&handle->tpt);
 
   
   handle->tpt.timeout = handle->tpt.com_timeout;
   /* connect the transport to the target server */
-  transport_connect (&handle->tpt,ip_address,(u16) ip_port);
+  transport_connect (&handle->tpt,ip_address,(uint16_t) ip_port);
 
   return 1;
 }
@@ -524,7 +594,7 @@ void transport_open_listener(lua_State *L, ServerHandle *handle)
   port = get_port_number (L,1);
 
   transport_open (&handle->ltpt);
-  transport_bind (&handle->ltpt,INADDR_ANY,(u16) port);
+  transport_bind (&handle->ltpt,INADDR_ANY,(uint16_t) port);
   transport_listen (&handle->ltpt,MAXCON);
 }
 
@@ -558,21 +628,16 @@ int transport_select(struct transport_node* head)
   int fdmax = 0;
   fd_set socks;
   int select_ret = -1;
-  int i = 0;
   struct transport_node* node = head;
   FD_ZERO(&socks);
   while( (node = node->next) != head ){
-    ++i;
-    int fd = node->t->fd;
+    int fd = (int)node->t->fd;
     FD_SET(fd,&socks);
     if( fd > fdmax ){
-      //      printf("tpt fd %d\n",fd);
       fdmax = fd;
     }
   }
-  //  printf("select count %d\n",i);
   select_ret = select(fdmax+1,&socks,NULL,NULL,NULL);
-  //  printf("select %d\n",select_ret);
   if( select_ret < 0 ){
     return select_ret;
   }
@@ -586,7 +651,6 @@ int transport_select(struct transport_node* head)
       trans->is_set = 0;
     }
   }
-  //  printf("NO FD FOUND\n");
   return select_ret;
 }
 

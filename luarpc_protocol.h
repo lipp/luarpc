@@ -4,10 +4,10 @@
 #include "luarpc_rpc.h" // struct Transport
 
 
-void transport_write_u8( Transport *tpt, u8 x );
-u8 transport_read_u8( Transport *tpt );
-void transport_write_u32( Transport *tpt, u32 x );
-u32 transport_read_u32( Transport *tpt );
+void transport_write_uint8_t( Transport *tpt, uint8_t x );
+uint8_t transport_read_uint8_t( Transport *tpt );
+void transport_write_uint32_t( Transport *tpt, uint32_t x );
+uint32_t transport_read_uint32_t( Transport *tpt );
 void transport_read_string( Transport *tpt, char *buffer, int length );
 void transport_write_string( Transport *tpt, const char *buffer, int length );
 

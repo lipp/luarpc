@@ -3,9 +3,14 @@
 #define LUARPC_H
 
 #include <stdio.h>
+
+#ifdef WIN32
+#include <WinSock2.h>
+#else
 #include <sys/time.h>
+#endif
 #include "cexcept.h"
-#include "type.h"
+#include "pstdint.h"
 #include "serial.h"
 
 #include "platform_conf.h"
@@ -17,14 +22,18 @@
 #define MAX_LINK_ERRS ( 2 ) // Maximum number of framing errors before connection reset
 
 #if defined( LUARPC_ENABLE_SERIAL )
-#define LUARPC_MODE "serial"
-#define tpt_handler ser_handler
+  #define LUARPC_MODE "serial"
+  #define tpt_handler ser_handler
 #elif defined( LUARPC_ENABLE_SOCKET )
-#define LUARPC_MODE "tcpip"
-typedef int tpt_handler;
-#define MAXCON ( 1 )
+  #define LUARPC_MODE "tcpip"
+  #ifdef WIN32
+    #define tpt_handler SOCKET 
+  #else
+    #define tpt_handler int 
+  #endif
+  #define MAXCON ( 1 )
 #else
-#error "No RPC mode Selected.."
+  #error "No RPC mode Selected.."
 #endif
 
 // a kind of silly way to get the maximum int, but oh well ...
@@ -100,13 +109,15 @@ struct _Transport
 {
   tpt_handler fd;
   unsigned tmr_id;
-  u32    loc_little: 1,               // Local is little endian?
+  uint32_t    loc_little: 1,               // Local is little endian?
          loc_armflt: 1,               // local float representation is arm float?
          loc_intnum: 1,               // Local is integer only?
          net_little: 1,               // Network is little endian?
          net_intnum: 1;               // Network is integer only?
-  u8     lnum_bytes;
+  uint8_t     lnum_bytes;
+#ifndef WIN32
   FILE* file;
+#endif
   int is_set;
   int must_die;
   struct timeval wait_timeout;
@@ -128,7 +139,7 @@ struct _Helper {
   Handle *handle;                     // pointer to handle object
 	Helper *parent;                     // parent helper
   int pref;                           // Parent reference idx in registry
-	u8 nparents;                        // number of parents
+	uint8_t nparents;                        // number of parents
   char funcname[NUM_FUNCNAME_CHARS];  // name of the function
 };
 
@@ -175,8 +186,8 @@ int transport_open_connection(lua_State *L, Handle *handle);
 void transport_accept (Transport *tpt, Transport *atpt);
 
 // Read & Write to Transport 
-void transport_read_buffer (Transport *tpt, u8 *buffer, int length);
-void transport_write_buffer (Transport *tpt, const u8 *buffer, int length);
+void transport_read_buffer (Transport *tpt, uint8_t *buffer, int length);
+void transport_write_buffer (Transport *tpt, const uint8_t *buffer, int length);
 
 // Check if data is available on connection without reading:
 // 		- 1 = data available, 0 = no data available

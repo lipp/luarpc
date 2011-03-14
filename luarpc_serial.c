@@ -80,9 +80,9 @@ void transport_accept (Transport *tpt, Transport *atpt)
 
 
 // Read & Write to Transport
-void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
+void transport_read_buffer (Transport *tpt, uint8_t *buffer, int length)
 {
-  u32 n;
+  uint32_t n;
   struct exception e;
   TRANSPORT_VERIFY_OPEN;
   
@@ -112,7 +112,7 @@ void transport_read_buffer (Transport *tpt, u8 *buffer, int length)
   }
 }
 
-void transport_write_buffer( Transport *tpt, const u8 *buffer, int length )
+void transport_write_buffer( Transport *tpt, const uint8_t *buffer, int length )
 {
   int n;
   struct exception e;

@@ -10,6 +10,6 @@
 
 #include "lua.h"
 
-void luaopen_rpc (lua_State *L);
+LUALIB_API void luaopen_rpc (lua_State *L);
 
 #endif
