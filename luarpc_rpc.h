@@ -134,13 +134,6 @@ struct _Helper {
   char funcname[NUM_FUNCNAME_CHARS];  // name of the function
 };
 
-typedef struct _ServerHandle ServerHandle;
-struct _ServerHandle {
-  Transport ltpt;   // listening transport, always valid if no error
-  //  Transport atpt;   // accepting transport, valid if connection established
-	int link_errs;
-};
-
 
 // Connection State Checking
 #ifdef WIN32_BUILD
@@ -168,7 +161,7 @@ void deal_with_error (lua_State *L, const char *error_string);
 void transport_init (Transport *tpt);
 
 // Open Listener / Server 
-void transport_open_listener(lua_State *L, ServerHandle *handle);
+void transport_open_listener(lua_State *L, Transport *handle);
 
 // Open Connection / Client 
 int transport_open_connection(lua_State *L, Transport *tpt);

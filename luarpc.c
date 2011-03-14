@@ -135,31 +135,16 @@ Transport *client_create( lua_State *L );
 // **************************************************************************
 // server side handle userdata objects. 
 
-static ServerHandle *server_handle_create( lua_State *L )
+static Transport *server_create( lua_State *L )
 {
-  ServerHandle *h = ( ServerHandle * )lua_newuserdata( L, sizeof( ServerHandle ) );
-  luaL_getmetatable( L, "rpc.server_handle" );
+  Transport *server = ( Transport * )lua_newuserdata( L, sizeof( Transport ) );
+  luaL_getmetatable( L, "rpc.server" );
   lua_setmetatable( L, -2 );
-
-  h->link_errs = 0;
-
-  transport_init( &h->ltpt );
-  //  transport_init( &h->atpt );
-  return h;
+  transport_init( server );
+  transport_open_listener(L,server);
+  return server;
 }
 
-static void server_handle_shutdown( ServerHandle *h )
-{
-  printf("server shutdown\n");
-  //  transport_close( &h->ltpt );
-  
-  //  transport_close( &h->atpt );
-}
-
-static void server_handle_destroy( ServerHandle *h )
-{
-  server_handle_shutdown( h );
-}
 
 // **************************************************************************
 // remote function calling (client side)
@@ -216,8 +201,9 @@ static int rpc_close( lua_State *L )
     }
     if( ismetatable_type( L, 1, "rpc.server_handle" ) )
     {
-      ServerHandle *handle = ( ServerHandle * )lua_touserdata( L, 1 );
-      server_handle_shutdown( handle );
+      Transport *handle = ( Transport * )lua_touserdata( L, 1 );
+      transport_close(handle);
+      //server_handle_shutdown( handle );
       return 0;
     }
   }
@@ -271,15 +257,15 @@ static int rpc_com_timeout( lua_State *L )
 
     if( ismetatable_type( L, 1, "rpc.server_handle" ) )
     {
-      ServerHandle *handle = ( ServerHandle * )lua_touserdata( L, 1 );
+      Transport *server = ( Transport * )lua_touserdata( L, 1 );
 
       double timeout_ms = luaL_optnumber(L,2,-1.0);
       if( timeout_ms != -1.0 ){
-        handle->ltpt.com_timeout = timeval_from_ms( timeout_ms );
+        server->com_timeout = timeval_from_ms( timeout_ms );
         return 0;
       }
       else {
-        lua_pushnumber(L,ms_from_timeval( handle->ltpt.com_timeout ) );
+        lua_pushnumber(L,ms_from_timeval( server->com_timeout ) );
         return 1;
       }
     }
@@ -313,30 +299,6 @@ static int rpc_com_timeout( lua_State *L )
 // }
 
 
-static ServerHandle *rpc_listen_helper( lua_State *L )
-{
-  struct exception e;
-  ServerHandle *handle = 0;
-
-  Try
-  {
-    // make server handle 
-    handle = server_handle_create( L );
-
-    // make listening transport 
-    transport_open_listener( L, handle );
-  }
-  Catch( e )
-  {
-    if( handle )
-      server_handle_destroy( handle );
-    
-    deal_with_error( L, error_string( e.errnum ) );
-    return 0;
-  }
-  return handle;
-}
-
 
 static void rpc_dispatch_accept(Transport* listener)
 {
@@ -362,16 +324,14 @@ static void rpc_dispatch_accept(Transport* listener)
 static int rpc_server( lua_State *L )
 {
   int shref;
-  ServerHandle *handle;
+  Transport *server;
 
   struct transport_node* node;
-  Transport* listener;
 
-  handle = rpc_listen_helper( L );
-  listener = &handle->ltpt; 
+  server = server_create( L );
 
   transport_list = transport_new_list();
-  transport_insert_to_list( transport_list, listener ); 
+  transport_insert_to_list( transport_list, server ); 
   node = transport_list;
   // Anchor handle in the registry
   //   This is needed because garbage collection can steal our handle, 
@@ -384,30 +344,30 @@ static int rpc_server( lua_State *L )
   shref = luaL_ref( L, LUA_REGISTRYINDEX );
   lua_rawgeti(L, LUA_REGISTRYINDEX, shref );
   
-  while ( transport_is_open( listener ) ){
+  while ( transport_is_open( server ) ){
     //    printf("luarpc: listening on %p\n",(void*)listener);
     if( transport_select(transport_list) > -1 ){
       while( (node = node->next) != transport_list ){
-        Transport* worker = node->t;
-        if( worker->is_set && worker != listener ){
-          rpc_dispatch_worker(L,worker);
+        Transport* client = node->t;
+        if( client->is_set && client != server ){
+          rpc_dispatch_worker(L,client);
         }
       }
       while( (node = node->next) != transport_list ){
-        Transport* worker = node->t;        
-        if( worker->must_die ){
-          node = transport_remove_from_list(transport_list,worker);
-          transport_delete(worker);
+        Transport* client = node->t;        
+        if( client->must_die ){
+          node = transport_remove_from_list(transport_list,client);
+          transport_delete(client);
         }
       }
-      if( listener->is_set ){
-        rpc_dispatch_accept(listener);     
+      if( server->is_set ){
+        rpc_dispatch_accept(server);     
       }
     }
   }
     
   luaL_unref( L, LUA_REGISTRYINDEX, shref );
-  server_handle_destroy( handle );
+  transport_close(server);
   return 0;
 }
 
@@ -576,8 +536,8 @@ LUALIB_API int luaopen_rpc(lua_State *L)
 
 const LUA_REG_TYPE rpc_client[] =
 {
-  { LSTRKEY( "__index" ), LFUNCVAL( handle_index ) },
-  { LSTRKEY( "__newindex"), LFUNCVAL( handle_newindex )},
+  { LSTRKEY( "__index" ), LFUNCVAL( client_index ) },
+  { LSTRKEY( "__newindex"), LFUNCVAL( client_newindex )},
   { LSTRKEY( "__gc"), LFUNCVAL( rpc_close )},
   { LNILKEY, LNILVAL }
 };
@@ -640,8 +600,8 @@ LUALIB_API int luaopen_rpc(lua_State *L)
 
 static const luaL_reg rpc_client_mt[] =
 {
-  { "__index", handle_index },
-  { "__newindex", handle_newindex },
+  { "__index", client_index },
+  { "__newindex", client_newindex },
   { "__gc", rpc_close},
   { NULL, NULL }
 };

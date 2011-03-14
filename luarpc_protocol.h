@@ -26,8 +26,8 @@ extern int global_error_handler;
 #define LUA_ISCALLABLE( state, idx ) lua_isfunction( state, idx )
 #endif
 
-int handle_index (lua_State *L);
-int handle_newindex (lua_State *L);
+int client_index (lua_State *L);
+int client_newindex (lua_State *L);
 int helper_newindex (lua_State *L);
 int helper_call (lua_State *L);
 int helper_index (lua_State *L);

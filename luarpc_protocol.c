@@ -752,7 +752,7 @@ static Helper *helper_create( lua_State *L, Transport *client, const char *funcn
 
 
 // indexing a handle returns a helper 
-int handle_index (lua_State *L)
+int client_index (lua_State *L)
 {
   const char *s;
   
@@ -771,10 +771,8 @@ int handle_index (lua_State *L)
   return 1;
 }
 
-int helper_newindex( lua_State *L );
-
 // indexing a handle returns a helper
-int handle_newindex( lua_State *L )
+int client_newindex( lua_State *L )
 {
   const char *s;
 

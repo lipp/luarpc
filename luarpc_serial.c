@@ -45,7 +45,7 @@ void transport_open( Transport *tpt, const char *path )
 }
 
 // Open Listener / Server 
-void transport_open_listener(lua_State *L, ServerHandle *handle)
+void transport_open_listener(lua_State *L, Transport *handle)
 {
   check_num_args (L,2); // 1st arg is path, 2nd is handle
   if (!lua_isstring (L,1))
