@@ -54,11 +54,6 @@ double ms_from_timeval( struct timeval t ){
   return t.tv_sec * 1000.0 + t.tv_usec / 1000.0;
 }
 
-
-/*void transport_delete (Transport *tpt){
-  free(tpt);
-  }*/
-
 Transport * transport_create (void){
   Transport* t = malloc(sizeof(Transport));
   memset(t,0,sizeof(Transport));
@@ -103,7 +98,7 @@ static void net_startup()
 }
 #endif
 
-
+``
 struct transport_node* transport_new_list(){
   struct transport_node* node = (struct transport_node*) malloc(sizeof(struct transport_node));  
   //  printf("node %p\n",node);
@@ -358,64 +353,6 @@ static ServerHandle *rpc_listen_helper( lua_State *L )
 }
 
 
-// rpc_listen( transport_indentifier ) --> server_handle
-//    transport_identifier defines where to listen, identifier type is subject to transport implementation
-/*static int rpc_listen( lua_State *L )
-{
-  ServerHandle *handle;
-
-  handle = rpc_listen_helper( L );
-  if ( handle == 0 )
-    return luaL_error( L, "bad handle" );
-    
-  return 1;
-  }
-
-
-// rpc_peek( server_handle ) --> 0 or 1 
-static int rpc_peek( lua_State *L )
-{
-  ServerHandle *handle;
-
-  check_num_args( L, 1 );
-  if ( !( lua_isuserdata( L, 1 ) && ismetatable_type( L, 1, "rpc.server_handle" ) ) )
-    return luaL_error( L, "arg must be server handle" );
-
-  handle = ( ServerHandle * )lua_touserdata( L, 1 );
-
-  // if accepting transport is open, see if there is any data to read
-  if ( transport_is_open( &handle->atpt ) )
-  {
-    if ( transport_readable( &handle->atpt ) )
-      lua_pushnumber( L, 1 );
-    else 
-      lua_pushnil( L );
-      
-    return 1;
-  }
-
-  // otherwise, see if there is a new connection on the listening transport
-  if ( transport_is_open( &handle->ltpt ) )
-  {
-    if ( transport_readable( &handle->ltpt ) )
-      lua_pushnumber ( L, 1 );
-    else
-      lua_pushnil( L );
-      
-    return 1;
-  }
-
-  lua_pushnumber( L, 0 );
-  return 1;
-  }*/
-
-struct transport_node* transport_list;
-
-
-Transport transports[100];
-int transport_count = 0;
-//int listener_index;
-//Transport* listener;
 static void rpc_dispatch_accept(Transport* listener)
 {
   
@@ -744,10 +681,6 @@ static const luaL_reg rpc_map[] =
   { "on_error", rpc_on_error },
   { "com_timeout", rpc_com_timeout },
   { "wait_timeout", rpc_wait_timeout },
-  //  { "listen", rpc_listen },
-  //  { "peek", rpc_peek },
-  //  { "dispatch", rpc_dispatch },
-//  { "rpc_async", rpc_async },
   { NULL, NULL }
 };
 
