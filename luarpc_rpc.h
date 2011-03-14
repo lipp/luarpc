@@ -110,10 +110,9 @@ struct _Transport
   tpt_handler fd;
   unsigned tmr_id;
   uint32_t    loc_little: 1,               // Local is little endian?
-         loc_armflt: 1,               // local float representation is arm float?
-         loc_intnum: 1,               // Local is integer only?
-         net_little: 1,               // Network is little endian?
-         net_intnum: 1;               // Network is integer only?
+    loc_intnum: 1,               // Local is integer only?
+    net_little: 1,               // Network is little endian?
+    net_intnum: 1;               // Network is integer only?
   uint8_t     lnum_bytes;
 #ifndef WIN32
   FILE* file;
@@ -125,18 +124,10 @@ struct _Transport
   struct timeval timeout;
 };
 
-typedef struct _Handle Handle;
-struct _Handle 
-{
-  Transport tpt;                      // the handle socket
-  int error_handler;                  // function reference
-  int async;                          // nonzero if async mode being used
-  int read_reply_count;               // number of async call return values to read
-};
 
 typedef struct _Helper Helper;
 struct _Helper {
-  Handle *handle;                     // pointer to handle object
+  Transport *handle;                     // pointer to handle object
 	Helper *parent;                     // parent helper
   int pref;                           // Parent reference idx in registry
 	uint8_t nparents;                        // number of parents
@@ -180,7 +171,7 @@ void transport_init (Transport *tpt);
 void transport_open_listener(lua_State *L, ServerHandle *handle);
 
 // Open Connection / Client 
-int transport_open_connection(lua_State *L, Handle *handle);
+int transport_open_connection(lua_State *L, Transport *tpt);
 
 // Accept Connection 
 void transport_accept (Transport *tpt, Transport *atpt);
@@ -195,6 +186,7 @@ int transport_readable (Transport *tpt);
 
 // Check if transport is open:
 //		- 1 = connection open, 0 = connection closed
+void transport_close (Transport *tpt);
 int transport_is_open (Transport *tpt);
 
 // Shut down connection

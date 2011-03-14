@@ -209,24 +209,23 @@ void transport_open (Transport *tpt)
   //  setvbuf(tpt->file,b150,_IOFBF,sizeof(b150));
 }
 
-/* close a socket */
-
-/*void transport_close (Transport *tpt)
+void transport_close (Transport *tpt)
 {
-  fclose (tpt->file);
-  close(tpt->fd);
-  //  tpt->fd = INVALID_TRANSPORT;
-  }*/
-
-void transport_delete (Transport *tpt){
 #ifdef WIN32
+  if( tpt->fd ){
   closesocket(tpt->fd);
+  tpt->fd = NULL;
+  }
 #else
   if( tpt->file ){
     fclose (tpt->file);
+    tpt->file = NULL;
   }
 #endif
+}
 
+void transport_delete (Transport *tpt){
+  transport_close( tpt );
   free(tpt);
 }
 
@@ -258,17 +257,17 @@ static void transport_setnonblock (Transport *tpt)
 static void transport_connect (Transport *tpt, uint32_t ip_address, uint16_t ip_port)
 {
   struct exception e;
-  struct sockaddr_in myname;
+  struct sockaddr_in name;
   int err;
   TRANSPORT_VERIFY_OPEN;
-  myname.sin_family = AF_INET;
-  myname.sin_port = htons (ip_port);
-  myname.sin_addr.s_addr = htonl (ip_address);
+  name.sin_family = AF_INET;
+  name.sin_port = htons (ip_port);
+  name.sin_addr.s_addr = htonl (ip_address);
 
   transport_setnonblock(tpt);
 
-  err = connect (tpt->fd, (struct sockaddr *) &myname, sizeof (myname));
-  if( err < 0 ){
+  err = connect (tpt->fd, (struct sockaddr *) &name, sizeof (name));
+  if( err != 0 ){
     if( sock_errno == EINPROGRESS ){
       fd_set set;        
       unsigned int len = sizeof(myname); 
@@ -286,6 +285,11 @@ static void transport_connect (Transport *tpt, uint32_t ip_address, uint16_t ip_
         e.type = fatal;
         Throw( e );
       }
+    }
+    else {
+      e.errnum = sock_errno;
+      e.type = fatal;
+      Throw( e );
     }
   }
 }
@@ -550,7 +554,7 @@ void transport_flush (Transport *tpt)
 #endif
 }
 
-int transport_open_connection(lua_State *L, Handle *handle)
+int transport_open_connection(lua_State *L, Transport* tpt)
 {
   int ip_port;
   uint32_t ip_address;
@@ -575,12 +579,11 @@ int transport_open_connection(lua_State *L, Handle *handle)
   }
   ip_address = ntohl ( *((uint32_t*)host->h_addr_list[0]) );
 
-  transport_open (&handle->tpt);
-
+  transport_open (tpt);
   
-  handle->tpt.timeout = handle->tpt.com_timeout;
+  tpt->timeout = tpt->com_timeout;
   /* connect the transport to the target server */
-  transport_connect (&handle->tpt,ip_address,(uint16_t) ip_port);
+  transport_connect (tpt,ip_address,(uint16_t) ip_port);
 
   return 1;
 }

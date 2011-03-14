@@ -16,13 +16,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef __MINGW32__
-void *alloca(size_t);
-#elif WIN32
-#define alloca _alloca
-else
-#include <alloca.h>
-#endif
 
 #include "lua.h"
 #include "lualib.h"
@@ -137,7 +130,7 @@ struct transport_node* transport_remove_from_list(struct transport_node* head, T
 
 struct exception_context the_exception_context[ 1 ];
 //static Helper *helper_create( lua_State *L, Handle *handle, const char *funcname );
-Handle *handle_create( lua_State *L );
+Transport *client_create( lua_State *L );
 
 // **************************************************************************
 // server side handle userdata objects. 
@@ -176,29 +169,27 @@ static void server_handle_destroy( ServerHandle *h )
 //      if there is an RPC error function defined, it will be called on error.
 
 
-static int rpc_connect( lua_State *L )
+static int rpc_client( lua_State *L )
 {
   struct exception e;
-  Handle *handle = 0;
+  Transport *client = 0;
   
   Try
   {
     double com_timeout_ms = luaL_optnumber(L,3,1000.0);
     double wait_timeout_ms = luaL_optnumber(L,5,3000.0);
-    handle = handle_create ( L );
+    client = client_create ( L );
 
-    handle->tpt.com_timeout = timeval_from_ms( com_timeout_ms );
-    handle->tpt.wait_timeout = timeval_from_ms( wait_timeout_ms );
-    
+    client->com_timeout = timeval_from_ms( com_timeout_ms );
+    client->wait_timeout = timeval_from_ms( wait_timeout_ms );    
+    client->timeout = client->com_timeout;
 
-    handle->tpt.timeout = handle->tpt.com_timeout;
-    transport_open_connection( L, handle );    
-    client_negotiate( &handle->tpt );
+    transport_open_connection( L, client );    
+    client_negotiate( client );
   }
   Catch( e )
   {     
-    deal_with_error( L, error_string( e.errnum ) );
-    lua_pushnil( L );
+    luaL_error(L,error_string(e.errnum) );
   }
   return 1;
 }
@@ -217,16 +208,10 @@ static int rpc_close( lua_State *L )
 
   if( lua_isuserdata( L, 1 ) )
   {
-    if( ismetatable_type( L, 1, "rpc.handle" ) )
+    if( ismetatable_type( L, 1, "rpc.client" ) )
     {
-      Handle *handle = ( Handle * )lua_touserdata( L, 1 );
-      //      transport_delete( &handle->tpt );
-
-#ifdef WIN32
-      closesocket(handle->tpt.fd);
-#else
-      fclose(handle->tpt.file);
-#endif
+      Transport *client = ( Transport * )lua_touserdata( L, 1 );
+      transport_close( client );
       return 0;
     }
     if( ismetatable_type( L, 1, "rpc.server_handle" ) )
@@ -236,7 +221,7 @@ static int rpc_close( lua_State *L )
       return 0;
     }
   }
-
+  
   return luaL_error(L,"arg must be handle");
 }
 
@@ -246,21 +231,21 @@ static int rpc_wait_timeout( lua_State *L )
 
   if( lua_isuserdata( L, 1 ) )
   {
-    if( ismetatable_type( L, 1, "rpc.handle" ) )
+    if( ismetatable_type( L, 1, "rpc.client" ) )
     {
-      Handle *handle = ( Handle * )lua_touserdata( L, 1 );
+      Transport *client = ( Transport * )lua_touserdata( L, 1 );
       double timeout_ms = luaL_optnumber(L,2,-1.0);
       if( timeout_ms != -1.0 ){
-        handle->tpt.wait_timeout = timeval_from_ms( timeout_ms );
+        client->wait_timeout = timeval_from_ms( timeout_ms );
         return 0;
       }
       else {
-        lua_pushnumber(L,ms_from_timeval( handle->tpt.wait_timeout ) );
+        lua_pushnumber(L,ms_from_timeval( client->wait_timeout ) );
         return 1;
       }
     }
   }
-  return luaL_error(L,"arg must be rpc.handle");
+  return luaL_error(L,"arg must be rpc.client");
 }
 
 static int rpc_com_timeout( lua_State *L )
@@ -269,17 +254,17 @@ static int rpc_com_timeout( lua_State *L )
 
   if( lua_isuserdata( L, 1 ) )
   {
-    if( ismetatable_type( L, 1, "rpc.handle" ) )
+    if( ismetatable_type( L, 1, "rpc.client" ) )
     {
-      Handle *handle = ( Handle * )lua_touserdata( L, 1 );
+      Transport *client = ( Transport * )lua_touserdata( L, 1 );
       
       double timeout_ms = luaL_optnumber(L,2,-1.0);
       if( timeout_ms != -1.0 ){
-        handle->tpt.com_timeout = timeval_from_ms( timeout_ms );
+        client->com_timeout = timeval_from_ms( timeout_ms );
         return 0;
       }
       else {
-        lua_pushnumber(L,ms_from_timeval( handle->tpt.com_timeout ) );
+        lua_pushnumber(L,ms_from_timeval( client->com_timeout ) );
         return 1;
       }
     }
@@ -314,7 +299,7 @@ static int rpc_com_timeout( lua_State *L )
 //   Handle *handle;
 //   check_num_args( L, 2 );
 // 
-//   if ( !lua_isuserdata( L, 1 ) || !ismetatable_type( L, 1, "rpc.handle" ) )
+//   if ( !lua_isuserdata( L, 1 ) || !ismetatable_type( L, 1, "rpc.client" ) )
 //     my_lua_error( L, "first arg must be client handle" );
 // 
 //   handle = ( Handle * )lua_touserdata( L, 1 );
@@ -448,7 +433,7 @@ static int rpc_on_error( lua_State *L )
 
   // @@@ add option for handle 
   // Handle *h = (Handle*) lua_touserdata (L,1); 
-  // if (lua_isuserdata (L,1) && ismetatable_type(L, 1, "rpc.handle")); 
+  // if (lua_isuserdata (L,1) && ismetatable_type(L, 1, "rpc.client")); 
 
   return 0;
 }
@@ -589,10 +574,11 @@ LUALIB_API int luaopen_rpc(lua_State *L)
 #define MIN_OPT_LEVEL 2
 #include "lrodefs.h"
 
-const LUA_REG_TYPE rpc_handle[] =
+const LUA_REG_TYPE rpc_client[] =
 {
   { LSTRKEY( "__index" ), LFUNCVAL( handle_index ) },
   { LSTRKEY( "__newindex"), LFUNCVAL( handle_newindex )},
+  { LSTRKEY( "__gc"), LFUNCVAL( rpc_close )},
   { LNILKEY, LNILVAL }
 };
 
@@ -631,7 +617,7 @@ LUALIB_API int luaopen_rpc(lua_State *L)
 {
 #if LUA_OPTIMIZE_MEMORY > 0
   luaL_rometatable(L, "rpc.helper", (void*)rpc_helper);
-  luaL_rometatable(L, "rpc.handle", (void*)rpc_handle);
+  luaL_rometatable(L, "rpc.client", (void*)rpc_client);
   luaL_rometatable(L, "rpc.server_handle", (void*)rpc_server_handle);
 #else
   luaL_register( L, "rpc", rpc_map );
@@ -641,8 +627,8 @@ LUALIB_API int luaopen_rpc(lua_State *L)
   luaL_newmetatable( L, "rpc.helper" );
   luaL_register( L, NULL, rpc_helper );
   
-  luaL_newmetatable( L, "rpc.handle" );
-  luaL_register( L, NULL, rpc_handle );
+  luaL_newmetatable( L, "rpc.client" );
+  luaL_register( L, NULL, rpc_client );
   
   luaL_newmetatable( L, "rpc.server_handle" );
 #endif
@@ -652,14 +638,15 @@ LUALIB_API int luaopen_rpc(lua_State *L)
 #else
 
 
-static const luaL_reg rpc_handle[] =
+static const luaL_reg rpc_client_mt[] =
 {
   { "__index", handle_index },
   { "__newindex", handle_newindex },
+  { "__gc", rpc_close},
   { NULL, NULL }
 };
 
-static const luaL_reg rpc_helper[] =
+static const luaL_reg rpc_helper_mt[] =
 {
   { "__call", helper_call },
   { "__index", helper_index },
@@ -668,14 +655,10 @@ static const luaL_reg rpc_helper[] =
   { NULL, NULL }
 };
 
-static const luaL_reg rpc_server_handle[] =
-{
-  { NULL, NULL }
-};
 
 static const luaL_reg rpc_map[] =
 {
-  { "connect", rpc_connect },
+  { "client", rpc_client },
   { "close", rpc_close },
   { "server", rpc_server },
   { "on_error", rpc_on_error },
@@ -692,10 +675,10 @@ LUALIB_API int luaopen_rpc(lua_State *L)
   lua_setfield(L, -2, "mode");
 
   luaL_newmetatable( L, "rpc.helper" );
-  luaL_register( L, NULL, rpc_helper );
+  luaL_register( L, NULL, rpc_helper_mt );
   
-  luaL_newmetatable( L, "rpc.handle" );
-  luaL_register( L, NULL, rpc_handle );
+  luaL_newmetatable( L, "rpc.client" );
+  luaL_register( L, NULL, rpc_client_mt );
   
   luaL_newmetatable( L, "rpc.server_handle" );
 

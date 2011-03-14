@@ -54,7 +54,7 @@ void *alloca(size_t);
 #endif*/
 
 // Prototypes for Local Functions
-Handle *handle_create( lua_State *L );
+Transport *client_create( lua_State *L );
 
 
 struct exception_context the_exception_context[ 1 ];
@@ -193,7 +193,7 @@ void transport_write_uint32_t( Transport *tpt, uint32_t x )
 static lua_Number transport_read_number( Transport *tpt )
 {
   lua_Number x;
-  uint8_t b[ 8 ]; // TODO: 
+  uint8_t* b = alloca(tpt->lnum_bytes); 
   struct exception e;
   TRANSPORT_VERIFY_OPEN;
   transport_read_buffer ( tpt, b, tpt->lnum_bytes );
@@ -203,15 +203,13 @@ static lua_Number transport_read_number( Transport *tpt )
   
   if( tpt->net_intnum != tpt->loc_intnum ) // if we differ on num types, use int
   {
-	lua_assert( 0 );
-  }
-  /*  switch( tpt->lnum_bytes ) // read integer types
-    {
+    switch( tpt->lnum_bytes ) // read integer types
+      {
       case 1: {
         int8_t y = *( int8_t * )b;
         x = ( lua_Number )y;
       } break;
-       case 2: {
+      case 2: {
         int16_t y = *( int16_t * )b;
         x = ( lua_Number )y;
       } break;
@@ -224,9 +222,9 @@ static lua_Number transport_read_number( Transport *tpt )
         x = ( lua_Number )y;
       } break;
       default: lua_assert( 0 );
-    }
+      }
   }
-  else*/
+  else
     x = ( lua_Number ) *( lua_Number * )b; // if types match, use native type
 
     
@@ -729,18 +727,15 @@ void deal_with_error(lua_State *L, const char *error_string)
     luaL_error( L, error_string );
 }
 
-Handle *handle_create( lua_State *L )
+Transport *client_create( lua_State *L )
 {
-  Handle *h = ( Handle * )lua_newuserdata( L, sizeof( Handle ) );
-  luaL_getmetatable( L, "rpc.handle" );
+  Transport *client = ( Transport * )lua_newuserdata( L, sizeof( Transport ) );
+  luaL_getmetatable( L, "rpc.client" );
   lua_setmetatable( L, -2 );
-  h->error_handler = LUA_NOREF;
-  h->async = 0;
-  h->read_reply_count = 0;
-  return h;
+  return client;
 }
 
-static Helper *helper_create( lua_State *L, Handle *handle, const char *funcname )
+static Helper *helper_create( lua_State *L, Transport *client, const char *funcname )
 {
   Helper *h = ( Helper * )lua_newuserdata( L, sizeof( Helper ) );
   luaL_getmetatable( L, "rpc.helper" );
@@ -748,7 +743,7 @@ static Helper *helper_create( lua_State *L, Handle *handle, const char *funcname
   
   lua_pushvalue( L, 1 ); // push parent handle
   h->pref = luaL_ref( L, LUA_REGISTRYINDEX ); // put ref into struct
-  h->handle = handle;
+  h->handle = client;
   h->parent = NULL;
   h->nparents = 0;
   strncpy( h->funcname, funcname, NUM_FUNCNAME_CHARS );
@@ -762,7 +757,7 @@ int handle_index (lua_State *L)
   const char *s;
   
   check_num_args( L, 2 );
-  MYASSERT( lua_isuserdata( L, 1 ) && ismetatable_type( L, 1, "rpc.handle" ) );
+  MYASSERT( lua_isuserdata( L, 1 ) && ismetatable_type( L, 1, "rpc.client" ) );
 
   if( lua_type( L, 2 ) != LUA_TSTRING )
     return luaL_error( L, "can't index a handle with a non-string" );
@@ -770,7 +765,7 @@ int handle_index (lua_State *L)
   if ( strlen( s ) > NUM_FUNCNAME_CHARS - 1 )
     return luaL_error( L, error_string( ERR_LONGFNAME ) );
     
-  helper_create( L, ( Handle * )lua_touserdata( L, 1 ), s );
+  helper_create( L, ( Transport * )lua_touserdata( L, 1 ), s );
 
   // return the helper object 
   return 1;
@@ -784,7 +779,7 @@ int handle_newindex( lua_State *L )
   const char *s;
 
   check_num_args( L, 3 );
-  MYASSERT( lua_isuserdata( L, 1 ) && ismetatable_type( L, 1, "rpc.handle" ) );
+  MYASSERT( lua_isuserdata( L, 1 ) && ismetatable_type( L, 1, "rpc.client" ) );
 
   if( lua_type( L, 2 ) != LUA_TSTRING )
     return luaL_error( L, "can't index handle with a non-string" );
@@ -792,7 +787,7 @@ int handle_newindex( lua_State *L )
   if ( strlen( s ) > NUM_FUNCNAME_CHARS - 1 )
     return luaL_error( L, error_string( ERR_LONGFNAME ) );
   
-  helper_create( L, ( Handle * )lua_touserdata( L, 1 ), "" );
+  helper_create( L, ( Transport* )lua_touserdata( L, 1 ), "" );
   lua_replace(L, 1);
 
   helper_newindex( L );
@@ -805,7 +800,7 @@ static void helper_remote_index( Helper *helper )
 {
   int i, len;
   Helper **hstack;
-  Transport *tpt = &helper->handle->tpt;
+  Transport *tpt = helper->handle;
   
   // get length of name & make stack of helpers
   len = strlen( helper->funcname );
@@ -856,7 +851,7 @@ static int helper_get( lua_State *L, Helper *helper )
 {
   struct exception e;
   int freturn = 0;
-  Transport *tpt = &helper->handle->tpt;
+  Transport *tpt = helper->handle;
   
   Try
   {
@@ -869,7 +864,7 @@ static int helper_get( lua_State *L, Helper *helper )
   }
   Catch( e )
   {
-    freturn = generic_catch_handler( L, &helper->handle->tpt, e );
+    freturn = generic_catch_handler( L, helper->handle, e );
   }
   return freturn;
 }
@@ -887,7 +882,7 @@ int helper_call (lua_State *L)
   h = ( Helper * )luaL_checkudata(L, 1, "rpc.helper");
   luaL_argcheck(L, h, 1, "helper expected");
   
-  tpt = &h->handle->tpt;
+  tpt = h->handle;
   
   // capture special calls, otherwise execute normal remote call
   if( strcmp("get", h->funcname ) == 0 )
@@ -956,7 +951,7 @@ int helper_call (lua_State *L)
     }
     Catch( e )
     {
-      freturn = generic_catch_handler( L, &h->handle->tpt, e );
+      freturn = generic_catch_handler( L, h->handle, e );
     }
   }
   return freturn;
@@ -976,7 +971,7 @@ int helper_newindex( lua_State *L )
   
   luaL_checktype(L, -2, LUA_TSTRING );
   
-  tpt = &h->handle->tpt;
+  tpt = h->handle;
   
   Try
   {  
@@ -1007,7 +1002,7 @@ int helper_newindex( lua_State *L )
   }
   Catch( e )
   {
-    freturn = generic_catch_handler( L, &h->handle->tpt, e );
+    freturn = generic_catch_handler( L, h->handle, e );
   }
   return freturn;
 }
@@ -1343,7 +1338,7 @@ static int rpc_on_error( lua_State *L )
 
   // @@@ add option for handle 
   // Handle *h = (Handle*) lua_touserdata (L,1); 
-  // if (lua_isuserdata (L,1) && ismetatable_type(L, 1, "rpc.handle")); 
+  // if (lua_isuserdata (L,1) && ismetatable_type(L, 1, "rpc.client")); 
 
   return 0;
 }
