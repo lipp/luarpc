@@ -270,11 +270,11 @@ static void transport_connect (Transport *tpt, uint32_t ip_address, uint16_t ip_
   if( err != 0 ){
     if( sock_errno == EINPROGRESS ){
       fd_set set;        
-      unsigned int len = sizeof(myname); 
+      unsigned int len = sizeof(name); 
       FD_ZERO (&set);
       FD_SET (tpt->fd,&set);
       if( select(tpt->fd+1,NULL,&set,NULL,&tpt->timeout) > 0 ){
-        if( getpeername(tpt->fd, (struct sockaddr *) &myname, &len) != 0 ){
+        if( getpeername(tpt->fd, (struct sockaddr *) &name, &len) != 0 ){
           e.errnum = sock_errno;
           e.type = fatal;
           Throw( e );
@@ -589,16 +589,16 @@ int transport_open_connection(lua_State *L, Transport* tpt)
 }
 
 
-void transport_open_listener(lua_State *L, ServerHandle *handle)
+void transport_open_listener(lua_State *L, Transport *server)
 {
   int port;
 
   check_num_args (L,2); /* 2nd arg is server handle */
   port = get_port_number (L,1);
 
-  transport_open (&handle->ltpt);
-  transport_bind (&handle->ltpt,INADDR_ANY,(uint16_t) port);
-  transport_listen (&handle->ltpt,MAXCON);
+  transport_open (server);
+  transport_bind (server,INADDR_ANY,(uint16_t) port);
+  transport_listen (server,MAXCON);
 }
 
 /* see if there is any data to read from a socket, without actually reading
